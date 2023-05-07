@@ -19,35 +19,69 @@
 
 # for each item in source folder 
 
-import argparse
+import click
 from pathlib import Path
+import shutil
+import os
 
 
-parser = argparse.ArgumentParser(
-    prog='FoldSync',
-    description='FoldSync synchronizes the replica folder with source folder',
-    epilog='Text at the bottom of help' # TODO improve this message
-)
+# @click.option('-l', '--log', help="Path to the log file")
+@click.command()
+@click.argument('source_dir', type=click.Path(path_type=Path))
+@click.argument('replica_dir', type=click.Path(path_type=Path))
+def run_sync(source_dir: Path, replica_dir: Path) -> None:
+    """
+    Synchronize replica_dir with source_dir\n
+    :param source_dir: Path to the source directory\n
+    :param replica_dir: Path to the destination directory
+    """
+    if not source_dir.exists() or not replica_dir.exists():
+        click.echo("The target directory doesn't exist")
+        raise SystemExit(1)
 
-parser.add_argument("source_folder", help="path to the source folder")
-parser.add_argument("replica_folder", help="path to the replica folder")
-parser.add_argument('-r', '--repeat', help="repeat interval", required=False, type=int)
-parser.add_argument('-l', '--log', help="path to log file", required=False)
+    click.echo('SOURCE DIRECTORY:')
 
-args = parser.parse_args()
+    simple_sync(source_dir, replica_dir)
 
-source_dir = Path(args.source)
-replica_dir = Path(args.replica)
+    # copy_files(source_dir, replica_dir)
 
-if not source_dir.exists() or not replica_dir.exists():
-    print("The target directory doesn't exist")
-    raise SystemExit(1)
+    print('\nREPLICA DIRECTORY:')
 
-print('SOURCE DIRECTORY:')
-for entry in source_dir.iterdir():
-    print(f'{entry.name}, {entry.stat().st_size}', end = ', ')
-    
+    for entry in replica_dir.iterdir():
+        click.echo(f'{entry.name}, size: {entry.stat().st_size}')
 
-print('\nreplica DIRECTORY:')
-for entry in replica_dir.iterdir():
-    print(f'{entry.name}, {entry.stat().st_size}', end = ', ')
+    # parser = argparse.ArgumentParser(
+    #     prog='FoldSync',
+    #     description='FoldSync synchronizes the replica folder with source folder',
+    #     epilog='Text at the bottom of help' # TODO improve this message
+    # )
+
+    # parser.add_argument("source_folder", help="path to the source folder")
+    # parser.add_argument("replica_folder", help="path to the replica folder")
+    # parser.add_argument('-r', '--repeat', help="repeat interval", required=False, type=int)
+    # parser.add_argument('-l', '--log', help="path to log file", required=False)
+
+def simple_sync(source: Path, destination: Path) -> None:
+    """
+    Very simple synchronization function
+    First it recursively clears the folder, and then it recursively copies the folder
+    :param source: Path to the source folder
+    :param destination: Path to the destination folder
+    :return:
+    """
+    shutil.rmtree(destination)
+    shutil.copytree(source, destination)
+
+def copy_files(source: Path, destination: Path) -> None:
+    if not destination.exists():
+        Path.mkdir(destination)
+    for file in source.iterdir():
+        if file.is_dir():
+            copy_files(file, destination.joinpath(file.name))
+        else:
+            click.echo(f'Copying file {file.name} of size: {file.stat().st_size} from {source} directory to {destination} directory')
+            shutil.copy2(os.path.join(source, file.name), destination)
+
+
+if __name__ == '__main__':
+    run_sync()
