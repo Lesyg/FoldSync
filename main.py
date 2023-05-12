@@ -1,39 +1,33 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
+import hashlib
+import logging
+import os
+import shutil
 import string
-
-# Synchronization must be one-way: after the synchronization content of the
-# replica folder should be modified to exactly match content of the source
-# folder;
-
-# Synchronization should be performed periodically.
-
-# Folder paths, synchronization interval and log file path should be provided using the command line arguments;
-
+from pathlib import Path
 
 import click
-from pathlib import Path
-import shutil
-import os
-import logging
-import hashlib
+import crontab
 
-
-# parser.add_argument('-r', '--repeat', help="repeat interval", required=False, type=int)
 
 @click.command()
 @click.argument('source_dir', type=click.Path(path_type=Path))
 @click.argument('replica_dir', type=click.Path(path_type=Path))
 @click.option('-l', '--log', type=click.Path(path_type=Path), help='Path to the log file')
-def run_sync(source_dir: Path, replica_dir: Path, log: Path) -> None:
+@click.option('-r', '--repeat', help="repeat interval in cron syntax, when not specified program runs only once",
+              type=click.STRING)
+def run_sync(source_dir: Path, replica_dir: Path, log: Path, repeat: string) -> None:
     """
     Synchronize replica_dir with source_dir\n
     :param source_dir: Path to the source directory\n
     :param replica_dir: Path to the destination directory
-    :param log: Path to the log file
     :return None
     """
 
     setup_log(log)
+
+    if repeat:
+        setup_repeat(repeat, source_dir, replica_dir, log)
 
     logging.info(f"Starting synchronization program")
 
@@ -44,6 +38,39 @@ def run_sync(source_dir: Path, replica_dir: Path, log: Path) -> None:
     copy_files(source_dir, replica_dir)
 
     logging.info("Synchronization successful, ending program\n")
+
+
+def setup_repeat(interval: string, source: Path, replica: Path, log: Path) -> None:
+    """
+    Creates a cron job for the user that ran this script
+    :param interval: interval in which to run this script in a cron syntax
+    :param source: path to the source directory
+    :param replica: path to the replica directory
+    :param log: path to the log file
+    :return: None
+    """
+    logging.info(f"installing script to run at {interval} interval")
+
+    cron = crontab.CronTab(user=os.getlogin())
+    jobs = cron.find_comment("FOLD_SYNC_JOB")
+    for job in jobs:
+        cron.remove(job)
+    job = cron.new(
+        command=f"{os.getcwd()}/main.py {source.absolute()} {replica.absolute()} -l {log.absolute()}",
+        comment="FOLD_SYNC_JOB")
+    try:
+        job.setall(interval)
+    except ValueError:
+        logging.error(f"This cron syntax {interval} is not valid")
+        logging.error("Script will not run repeatedly")
+        return
+
+    if not job.is_valid():
+        logging.error("Cron job is not valid")
+        logging.error("Script will not run repeatedly")
+        return
+
+    cron.write()
 
 
 def copy_files(source: Path, destination: Path) -> None:
