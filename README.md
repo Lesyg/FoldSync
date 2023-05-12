@@ -22,3 +22,18 @@ folder;
 >It is undesirable to use third-party libraries that implement folder synchronization;
 
 >It is allowed (and recommended) to use external libraries implementing other well-known algorithms. For example, there is no point in implementing yet another function that calculates MD5 if you need it for the task – it is perfectly acceptable to use a  third-party (or built-in) library.
+
+
+## Setup
+
+download the main.py file
+
+This program uses python dependencies click and crontab.
+
+The scheduling of this program is handled by cron.
+
+To install these packages run:
+
+`pip install click`
+
+`pip install python-crontab`
