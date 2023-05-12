@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+import string
 
 # Synchronization must be one-way: after the synchronization content of the
 # replica folder should be modified to exactly match content of the source
@@ -6,14 +7,7 @@
 
 # Synchronization should be performed periodically.
 
-# File creation/copying/removal operations should be logged to a file and to the console output;
-
 # Folder paths, synchronization interval and log file path should be provided using the command line arguments;
-
-# It is undesirable to use third-party libraries that implement folder synchronization;
-
-# It is allowed (and recommended) to use external libraries implementing other well-known algorithms. For example, there is no point in implementing yet another function that calculates MD5 if you need it for the task – it is perfectly acceptable to use a  third-party (or built-in) library.
-
 
 
 import click
@@ -21,6 +15,7 @@ from pathlib import Path
 import shutil
 import os
 import logging
+import hashlib
 
 
 # parser.add_argument('-r', '--repeat', help="repeat interval", required=False, type=int)
@@ -35,6 +30,7 @@ def run_sync(source_dir: Path, replica_dir: Path, log: Path) -> None:
     :param source_dir: Path to the source directory\n
     :param replica_dir: Path to the destination directory
     :param log: Path to the log file
+    :return None
     """
 
     setup_log(log)
@@ -45,22 +41,104 @@ def run_sync(source_dir: Path, replica_dir: Path, log: Path) -> None:
     validate(source_dir, replica_dir)
 
     logging.info("Starting synchronization")
-
     copy_files(source_dir, replica_dir)
 
-    logging.info("Synchronization succesfull, ending program\n")
+    logging.info("Synchronization successful, ending program\n")
 
 
 def copy_files(source: Path, destination: Path) -> None:
+    """
+    Copies all files from source directory to target directory
+    :param source: source directory
+    :param destination: destination directory
+    :return: None
+    """
     if not destination.exists():
         Path.mkdir(destination)
+
+    remove_unwanted(source, destination)
+
     for file in source.iterdir():
         if file.is_dir():
             copy_files(file, destination.joinpath(file.name))
         else:
-            logging.info(
-                f'Copying file {file.name} of size: {file.stat().st_size} from {source.absolute()} directory to {destination.absolute()} directory')
-            shutil.copy2(os.path.join(source, file.name), destination)
+            if not destination.joinpath(file.name).exists():
+                copy_file(source, destination, file)
+                continue
+            if file.stat().st_size != destination.joinpath(file.name).stat().st_size:
+                copy_file(source, destination, file)
+                continue
+            if not sha_eq(file, destination.joinpath(file.name)):
+                copy_file(source, destination, file)
+
+
+def copy_file(source: Path, destination: Path, file: Path) -> None:
+    """
+    Copy a file from source directory to destination directory
+    :param source: source directory
+    :param destination: destination directory
+    :param file: file to copy
+    :return: None
+    """
+    logging.info(
+        f'Copying file {file.name} of size: {file.stat().st_size} from {source.absolute()} directory to {destination.absolute()} directory')
+    shutil.copy2(os.path.join(source, file.name), destination)
+
+
+def sha_eq(source: Path, destination: Path) -> bool:
+    """
+    Computes and compares 2 hashes
+    :param source: path to the first file
+    :param destination: path to the second file
+    :return: true when hashes are equal, false when they differ
+    """
+    return hash_file(source) == hash_file(destination)
+
+
+def hash_file(file: Path) -> string:
+    """
+    Computes the hash of the file
+    :param file: path to the file to has
+    :return: returns the hash as a string
+    """
+    with open(file, 'rb') as f:
+        sha1 = hashlib.sha1()
+        while chunk := f.read(65536):
+            sha1.update(chunk)
+
+    return sha1.hexdigest()
+
+
+def remove_unwanted(source: Path, destination: Path) -> None:
+    """
+    Removes files and directories from target directory
+    that are not present in the source directory
+    :param source: path to source directory
+    :param destination: path to target directory
+    :return: None
+    """
+    path_set = set()
+    for file in destination.iterdir():
+        path_set.add(file)
+
+    for file in source.iterdir():
+        if destination.joinpath(file.name) in path_set:
+            path_set.remove(destination.joinpath(file.name))
+
+    for file in path_set:
+        if file.is_dir():
+            remove_directory(file)
+        else:
+            logging.info(f"Removing unwanted file {file.absolute()} from destination directory")
+            file.unlink()
+
+
+def remove_directory(file: Path) -> None:
+    if file.is_dir():
+        remove_directory(file)
+    else:
+        logging.info(f"Removing unwanted file {file.absolute()} from destination directory")
+        file.unlink()
 
 
 def validate(source_dir: Path, replica_dir: Path) -> None:
@@ -100,7 +178,7 @@ def setup_log(file: Path) -> None:
             logging.StreamHandler()
         ])
     else:
-        logging.basicConfig(format='%(asctime)s:%(levelname)s:%(message)s', level=logging.INFO, handlers=[
+        logging.basicConfig(format='%(asctime)s:%(levelname)s:%(message)s', level=logging.DEBUG, handlers=[
             logging.StreamHandler()
         ])
 
