@@ -25,14 +25,13 @@ def run_sync(source_dir: Path, replica_dir: Path, log: Path, repeat: string) -> 
     """
 
     setup_log(log)
-
-    if repeat:
-        setup_repeat(repeat, source_dir, replica_dir, log)
-
-    logging.info(f"Starting synchronization program")
+    logging.info("Starting application")
 
     logging.info("Validating directories")
     validate(source_dir, replica_dir)
+
+    if repeat:
+        setup_repeat(repeat, source_dir, replica_dir, log)
 
     logging.info("Starting synchronization")
     copy_files(source_dir, replica_dir)
