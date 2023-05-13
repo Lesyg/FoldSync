@@ -54,7 +54,7 @@ The scheduling of this program is handled by cron and windows task scheduler.
 `pip install click`
 
 `pip install python-crontab`
-
+```
 On nt system the interval is inputted in windows task scheduler syntax
 MINUTE - Specifies the number of minutes before the task should run.
 HOURLY - Specifies the number of hours before the task should run.
@@ -65,7 +65,7 @@ ONCE - Specifies that that task runs once at a specified date and time.
 ONSTART - Specifies that the task runs every time the system starts. You can specify a start date, or run the task the next time the system starts.
 ONLOGON - Specifies that the task runs whenever a user (any user) logs on. You can specify a date, or run the task the next time the user logs on.
 ONIDLE - Specifies that the task runs whenever the system is idle for a specified period of time. You can specify a date, or run the task the next time the system is idle.
-
+```
 [more on the syntax](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/schtasks-create?source=recommendations#parameters)
 
 
