@@ -10,15 +10,21 @@ from pathlib import Path
 import click
 import crontab
 
+# Specifies how many bytes are read at once when computing SHA1 hash
+SHA1_READ_BYTES = 65536
+
 
 @click.command()
 @click.argument('source_dir', type=click.Path(path_type=Path))
 @click.argument('replica_dir', type=click.Path(path_type=Path))
 @click.option('-l', '--log', type=click.Path(path_type=Path), help='Path to the log file')
-@click.option('-r', '--repeat', help="repeat interval in cron syntax or windows task scheduler type, when not specified program runs only once",
+@click.option('-r', '--repeat',
+              help="Repeat interval in cron syntax or windows task scheduler type, when not specified program runs "
+                   "only once",
               type=click.STRING)
-@click.option('-rl', '--repeat-value', help="repeat interval lenght for windows task scheduler, when not specified defaults to 1",
-type=click.INT)
+@click.option('-rv', '--repeat-value',
+              help="Repeat interval length for windows task scheduler, when not specified defaults to 1",
+              type=click.INT)
 def run_sync(source_dir: Path, replica_dir: Path, log: Path, repeat: string, repeat_value: int) -> None:
     """
     Synchronize replica_dir with source_dir\n
@@ -26,14 +32,14 @@ def run_sync(source_dir: Path, replica_dir: Path, log: Path, repeat: string, rep
     :param replica_dir: Path to the destination directory
     :return None
     """
-    setup_log(log)
+    setup_logging(log)
     logging.info("Starting application")
 
     logging.info("Validating directories")
     validate(source_dir, replica_dir)
 
     if repeat:
-        setup_repeat(repeat, source_dir, replica_dir, log, repeat_value if repeat_value != None else 1)
+        setup_repeat(repeat, source_dir, replica_dir, log, repeat_value if repeat_value is not None else 1)
 
     logging.info("Starting synchronization")
     copy_files(source_dir, replica_dir)
@@ -56,28 +62,32 @@ def setup_repeat(interval: string, source: Path, replica: Path, log: Path, inter
     else:
         setup_repeat_posix(interval, source, replica, log)
 
+
 def setup_repeat_win(interval_type: string, source: Path, replica: Path, log: Path, interval_value: int) -> None:
     """
     Creates a windows task schedule for the user that ran this script
-    :param interval: interval in which to run this script in a cron syntax or windows task syntax
+    :param interval_type: interval in which to run this script in a cron syntax or windows task syntax
     :param source: path to the source directory
     :param replica: path to the replica directory
     :param log: path to the log file
     :param interval_value: interval value for windows task schedule
     :return: None
     """
-    logging.info(f"installing script on windows to run at {interval_type} interval")
-    
+    logging.info(f"Installing script on windows to run at {interval_type} interval")
+
     task_name = "FOLD_SYNC_TASK"
     task_command = f"python {Path(sys.argv[0]).absolute()} {source.absolute()} {replica.absolute()} -l {log.absolute()}"
 
     try:
-        os.system(f"schtasks /Create /TN {task_name} /TR \"{task_command}\" /SC {interval_type} /MO {str(interval_value)} /RU {os.getlogin()} /F")
+        logging.info(
+            f"Creating scheduled task: schtasks /Create /TN {task_name} /TR \"{task_command}\" /SC {interval_type} /MO {str(interval_value)} /RU {os.getlogin()} /F")
+        os.system(
+            f"schtasks /Create /TN {task_name} /TR \"{task_command}\" /SC {interval_type} /MO {str(interval_value)} /RU {os.getlogin()} /F")
     except Exception as e:
         logging.error(f"Failed to setup scheduled task: {e}")
         logging.error("Script will not run repeatedly")
         return
-    logging.info(f"creating scheduled task: schtasks /Create /TN {task_name} /TR \"{task_command}\" /SC {interval_type} /MO {str(interval_value)} /RU {os.getlogin()} /F")
+    logging.info("scheduled task created successfully")
 
 
 def setup_repeat_posix(interval: string, source: Path, replica: Path, log: Path) -> None:
@@ -89,8 +99,9 @@ def setup_repeat_posix(interval: string, source: Path, replica: Path, log: Path)
     :param log: path to the log file
     :return: None
     """
-    logging.info(f"installing script for posix system to run at {interval} interval")
-
+    logging.info(f"Installing script for posix system to run at {interval} interval")
+    logging.info(
+        f"Creating cron job: {interval} {Path(sys.argv[0]).absolute()} {source.absolute()} {replica.absolute()} -l {log.absolute()}")
     cron = crontab.CronTab(user=os.getlogin())
     jobs = cron.find_comment("FOLD_SYNC_JOB")
     for job in jobs:
@@ -109,8 +120,13 @@ def setup_repeat_posix(interval: string, source: Path, replica: Path, log: Path)
         logging.error("Cron job is not valid")
         logging.error("Script will not run repeatedly")
         return
-    logging.info(f"creating cron: {Path(sys.argv[0]).absolute()} {source.absolute()} {replica.absolute()} -l {log.absolute()}")
-    cron.write()
+    try:
+        cron.write()
+    except Exception as e:
+        logging.error("Something went wrong while creating cron job")
+        logging.debug(e)
+        return
+    logging.info("Created cron job successfully")
 
 
 def copy_files(source: Path, destination: Path) -> None:
@@ -122,7 +138,6 @@ def copy_files(source: Path, destination: Path) -> None:
     """
     if not destination.exists():
         Path.mkdir(destination)
-
 
     remove_unwanted(source, destination)
 
@@ -136,7 +151,7 @@ def copy_files(source: Path, destination: Path) -> None:
             if file.stat().st_size != destination.joinpath(file.name).stat().st_size:
                 copy_file(source, destination, file)
                 continue
-            if not sha_eq(file, destination.joinpath(file.name)):
+            if not hash_file(file) == hash_file(destination.joinpath(file.name)):
                 copy_file(source, destination, file)
 
 
@@ -153,16 +168,6 @@ def copy_file(source: Path, destination: Path, file: Path) -> None:
     shutil.copy2(os.path.join(source, file.name), destination)
 
 
-def sha_eq(source: Path, destination: Path) -> bool:
-    """
-    Computes and compares 2 hashes
-    :param source: path to the first file
-    :param destination: path to the second file
-    :return: true when hashes are equal, false when they differ
-    """
-    return hash_file(source) == hash_file(destination)
-
-
 def hash_file(file: Path) -> string:
     """
     Computes the hash of the file
@@ -171,7 +176,7 @@ def hash_file(file: Path) -> string:
     """
     with open(file, 'rb') as f:
         sha1 = hashlib.sha1()
-        while chunk := f.read(65536):
+        while chunk := f.read(SHA1_READ_BYTES):
             sha1.update(chunk)
 
     return sha1.hexdigest()
@@ -234,7 +239,7 @@ def validate(source_dir: Path, replica_dir: Path) -> None:
         Path.mkdir(replica_dir)
 
 
-def setup_log(file: Path) -> None:
+def setup_logging(file: Path) -> None:
     """
     Configures logging
     :param file: path to the file logs will be written to
