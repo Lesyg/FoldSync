@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import string
+import sys
 from pathlib import Path
 
 import click
@@ -14,16 +15,17 @@ import crontab
 @click.argument('source_dir', type=click.Path(path_type=Path))
 @click.argument('replica_dir', type=click.Path(path_type=Path))
 @click.option('-l', '--log', type=click.Path(path_type=Path), help='Path to the log file')
-@click.option('-r', '--repeat', help="repeat interval in cron syntax, when not specified program runs only once",
+@click.option('-r', '--repeat', help="repeat interval in cron syntax or windows task scheduler type, when not specified program runs only once",
               type=click.STRING)
-def run_sync(source_dir: Path, replica_dir: Path, log: Path, repeat: string) -> None:
+@click.option('-rl', '--repeat-value', help="repeat interval lenght for windows task scheduler, when not specified defaults to 1",
+type=click.INT)
+def run_sync(source_dir: Path, replica_dir: Path, log: Path, repeat: string, repeat_value: int) -> None:
     """
     Synchronize replica_dir with source_dir\n
     :param source_dir: Path to the source directory\n
     :param replica_dir: Path to the destination directory
     :return None
     """
-
     setup_log(log)
     logging.info("Starting application")
 
@@ -31,7 +33,7 @@ def run_sync(source_dir: Path, replica_dir: Path, log: Path, repeat: string) -> 
     validate(source_dir, replica_dir)
 
     if repeat:
-        setup_repeat(repeat, source_dir, replica_dir, log)
+        setup_repeat(repeat, source_dir, replica_dir, log, repeat_value if repeat_value != None else 1)
 
     logging.info("Starting synchronization")
     copy_files(source_dir, replica_dir)
@@ -39,23 +41,62 @@ def run_sync(source_dir: Path, replica_dir: Path, log: Path, repeat: string) -> 
     logging.info("Synchronization successful, ending program\n")
 
 
-def setup_repeat(interval: string, source: Path, replica: Path, log: Path) -> None:
+def setup_repeat(interval: string, source: Path, replica: Path, log: Path, interval_value: int) -> None:
+    """
+    Creates either a cron job or a windows task schedule for the user that ran this script
+    :param interval: interval in which to run this script in a cron syntax or windows task syntax
+    :param source: path to the source directory
+    :param replica: path to the replica directory
+    :param log: path to the log file
+    :param interval_value: interval value for windows task schedule
+    :return: None
+    """
+    if os.name == 'nt':
+        setup_repeat_win(interval, source, replica, log, interval_value)
+    else:
+        setup_repeat_posix(interval, source, replica, log)
+
+def setup_repeat_win(interval_type: string, source: Path, replica: Path, log: Path, interval_value: int) -> None:
+    """
+    Creates a windows task schedule for the user that ran this script
+    :param interval: interval in which to run this script in a cron syntax or windows task syntax
+    :param source: path to the source directory
+    :param replica: path to the replica directory
+    :param log: path to the log file
+    :param interval_value: interval value for windows task schedule
+    :return: None
+    """
+    logging.info(f"installing script on windows to run at {interval_type} interval")
+    
+    task_name = "FOLD_SYNC_TASK"
+    task_command = f"python {Path(sys.argv[0]).absolute()} {source.absolute()} {replica.absolute()} -l {log.absolute()}"
+
+    try:
+        os.system(f"schtasks /Create /TN {task_name} /TR \"{task_command}\" /SC {interval_type} /MO {str(interval_value)} /RU {os.getlogin()} /F")
+    except Exception as e:
+        logging.error(f"Failed to setup scheduled task: {e}")
+        logging.error("Script will not run repeatedly")
+        return
+    logging.info(f"creating scheduled task: schtasks /Create /TN {task_name} /TR \"{task_command}\" /SC {interval_type} /MO {str(interval_value)} /RU {os.getlogin()} /F")
+
+
+def setup_repeat_posix(interval: string, source: Path, replica: Path, log: Path) -> None:
     """
     Creates a cron job for the user that ran this script
-    :param interval: interval in which to run this script in a cron syntax
+    :param interval: interval in which to run this script in a cron syntax or windows task syntax
     :param source: path to the source directory
     :param replica: path to the replica directory
     :param log: path to the log file
     :return: None
     """
-    logging.info(f"installing script to run at {interval} interval")
+    logging.info(f"installing script for posix system to run at {interval} interval")
 
     cron = crontab.CronTab(user=os.getlogin())
     jobs = cron.find_comment("FOLD_SYNC_JOB")
     for job in jobs:
         cron.remove(job)
     job = cron.new(
-        command=f"{os.getcwd()}/main.py {source.absolute()} {replica.absolute()} -l {log.absolute()}",
+        command=f"{Path(sys.argv[0]).absolute()} {source.absolute()} {replica.absolute()} -l {log.absolute()}",
         comment="FOLD_SYNC_JOB")
     try:
         job.setall(interval)
@@ -68,7 +109,7 @@ def setup_repeat(interval: string, source: Path, replica: Path, log: Path) -> No
         logging.error("Cron job is not valid")
         logging.error("Script will not run repeatedly")
         return
-
+    logging.info(f"creating cron: {Path(sys.argv[0]).absolute()} {source.absolute()} {replica.absolute()} -l {log.absolute()}")
     cron.write()
 
 
@@ -81,6 +122,7 @@ def copy_files(source: Path, destination: Path) -> None:
     """
     if not destination.exists():
         Path.mkdir(destination)
+
 
     remove_unwanted(source, destination)
 
